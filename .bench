@@ -1,0 +1,5 @@
+setEnvironmentVariable CARGO_HOME ~/.cargo
+
+appendEnvironmentVariable PATH : "$CARGO_HOME/bin"
+
+checkDirectory $CARGO_HOME
