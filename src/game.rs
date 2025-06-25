@@ -181,3 +181,248 @@ impl<'info> Game<'info> {
         self.check_dealer();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::tfhe_keys::initialize_keys;
+    use crate::tfhe_values::decrypt_cards;
+
+    const J: u8 = 11;
+    const Q: u8 = 12;
+    const K: u8 = 13;
+    const A: u8 = 14;
+
+    #[test]
+    fn create_game() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![9, 8, 7, 6];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(vec!(6, 7), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+    }
+
+    #[test]
+    fn dealer_busts_early() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![A, A, 8, 7];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(A, A), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::DealerBusts, game.state);
+    }
+
+    #[test]
+    fn dealer_busts_late() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![9, 8, 7, 8, 7];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.stand();
+
+        assert_eq!(GameState::WaitingForDealer, game.state);
+
+        game.hit_as_dealer();
+
+        assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(7, 8, 9), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::DealerBusts, game.state);
+    }
+
+    #[test]
+    fn dealer_wins() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![Q, J, 9, 8];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.stand();
+
+        assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::DealerWins, game.state);
+    }
+
+    #[test]
+    fn dealer_wins_early() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![A, K, 7, 6];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(vec!(6, 7), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(K, A), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::DealerWins, game.state);
+    }
+
+    #[test]
+    fn dealer_wins_late() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![8, 7, 6, Q, J];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.stand();
+
+        assert_eq!(GameState::WaitingForDealer, game.state);
+
+        game.hit_as_dealer();
+
+        assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(6, 7, 8), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::DealerWins, game.state);
+    }
+
+    #[test]
+    fn game_ends_in_a_tie() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![9, 8, 9, 8];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.stand();
+
+        assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::Tie, game.state);
+    }
+
+    #[test]
+    fn player_busts_early() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![8, 7, A, A];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(vec!(A, A), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::PlayerBusts, game.state);
+    }
+
+    #[test]
+    fn player_busts_late() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![9, 8, 7, 8, 7];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.hit_as_player();
+
+        assert_eq!(vec!(7, 8, 9), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::PlayerBusts, game.state);
+    }
+
+    #[test]
+    fn player_wins() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![9, 8, Q, J];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.stand();
+
+        assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::PlayerWins, game.state);
+    }
+
+    #[test]
+    fn player_wins_early() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![7, 6, A, K];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(vec!(K, A), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(6, 7), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::PlayerWins, game.state);
+    }
+
+    #[test]
+    fn player_wins_late() {
+        let key = initialize_keys();
+
+        let mut game = Game::new(&key);
+
+        let deck = vec![8, Q, J, 7, 6];
+
+        game.plant_deck(&deck);
+        game.create_game();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.hit_as_player();
+
+        assert_eq!(GameState::WaitingForPlayer, game.state);
+
+        game.stand();
+
+        assert_eq!(vec!(6, 7, 8), decrypt_cards(&key, &game.cards_for_player));
+        assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_dealer));
+        assert_eq!(GameState::PlayerWins, game.state);
+    }
+}
