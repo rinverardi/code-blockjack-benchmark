@@ -1,30 +1,31 @@
-use crate::game_state::GameState;
-use crate::tfhe_values::{decrypt_cards, encrypt_points, encrypt_state, SEED_COUNTER};
+use crate::tfhe_values::{decrypt_cards, encrypt_points, encrypt_state};
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tfhe::prelude::{DivRem, FheDecrypt, FheEq, FheOrd, IfThenElse};
 use tfhe::{ClientKey, FheUint8, Seed};
 
-pub struct Game<'info> {
+pub static SEED_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+pub struct SecureGame<'info> {
     cards_for_dealer: Vec<FheUint8>,
     cards_for_player: Vec<FheUint8>,
     deck: Vec<FheUint8>,
     key: &'info ClientKey,
-    state: GameState,
+    state: SecureGameState,
 }
 
-impl<'info> Game<'info> {
+impl<'info> SecureGame<'info> {
     fn check_dealer(&mut self) {
-        self.state = GameState::Checking;
+        self.state = SecureGameState::Checking;
 
         let points_for_player = self.rate_cards(&self.cards_for_player);
         let points_for_dealer = self.rate_cards(&self.cards_for_dealer);
 
         let state = points_for_dealer.lt(17).select(
-            &encrypt_state(self.key, GameState::WaitingForDealer),
+            &encrypt_state(self.key, SecureGameState::WaitingForDealer),
             &points_for_dealer.gt(21).select(
-                &encrypt_state(self.key, GameState::DealerBusts),
+                &encrypt_state(self.key, SecureGameState::DealerBusts),
                 &self.game_over(&points_for_dealer, &points_for_player),
             ),
         );
@@ -33,20 +34,20 @@ impl<'info> Game<'info> {
     }
 
     fn check_dealer_and_player(&mut self) {
-        self.state = GameState::Checking;
+        self.state = SecureGameState::Checking;
 
         let points_for_player = self.rate_cards(&self.cards_for_player);
         let points_for_dealer = self.rate_cards(&self.cards_for_dealer);
 
         let state = points_for_player.eq(21).select(
-            &encrypt_state(self.key, GameState::PlayerWins),
+            &encrypt_state(self.key, SecureGameState::PlayerWins),
             &points_for_player.gt(21).select(
-                &encrypt_state(self.key, GameState::PlayerBusts),
+                &encrypt_state(self.key, SecureGameState::PlayerBusts),
                 &points_for_dealer.eq(21).select(
-                    &encrypt_state(self.key, GameState::DealerWins),
+                    &encrypt_state(self.key, SecureGameState::DealerWins),
                     &points_for_dealer.gt(21).select(
-                        &encrypt_state(self.key, GameState::DealerBusts),
-                        &encrypt_state(self.key, GameState::WaitingForPlayer),
+                        &encrypt_state(self.key, SecureGameState::DealerBusts),
+                        &encrypt_state(self.key, SecureGameState::WaitingForPlayer),
                     ),
                 ),
             ),
@@ -56,13 +57,13 @@ impl<'info> Game<'info> {
     }
 
     fn check_player(&mut self) {
-        self.state = GameState::Checking;
+        self.state = SecureGameState::Checking;
 
         let points_for_player = self.rate_cards(&self.cards_for_player);
 
         let state = points_for_player.gt(21).select(
-            &encrypt_state(self.key, GameState::PlayerBusts),
-            &encrypt_state(self.key, GameState::WaitingForPlayer),
+            &encrypt_state(self.key, SecureGameState::PlayerBusts),
+            &encrypt_state(self.key, SecureGameState::WaitingForPlayer),
         );
 
         self.decrypt_state(state);
@@ -101,23 +102,23 @@ impl<'info> Game<'info> {
     fn decrypt_state(&mut self, state: FheUint8) {
         let state_value: u8 = state.decrypt(self.key);
 
-        self.state = GameState::try_from(state_value).unwrap();
+        self.state = SecureGameState::try_from(state_value).unwrap();
     }
 
     pub fn dump_game(&self) {
         dbg!(
             decrypt_cards(&self.key, &self.cards_for_player),
             decrypt_cards(&self.key, &self.cards_for_dealer),
-            self.state
+            &self.state
         );
     }
 
     fn game_over(&self, points_for_dealer: &FheUint8, points_for_player: &FheUint8) -> FheUint8 {
         points_for_dealer.gt(points_for_player).select(
-            &encrypt_state(self.key, GameState::DealerWins),
+            &encrypt_state(self.key, SecureGameState::DealerWins),
             &points_for_dealer.lt(points_for_player).select(
-                &encrypt_state(self.key, GameState::PlayerWins),
-                &encrypt_state(self.key, GameState::Tie),
+                &encrypt_state(self.key, SecureGameState::PlayerWins),
+                &encrypt_state(self.key, SecureGameState::Tie),
             ),
         )
     }
@@ -138,7 +139,7 @@ impl<'info> Game<'info> {
             cards_for_player: vec![],
             deck: vec![],
             key: key,
-            state: GameState::Uninitialized,
+            state: SecureGameState::Uninitialized,
         }
     }
 
@@ -151,13 +152,10 @@ impl<'info> Game<'info> {
     }
 
     fn random_card(&self) -> FheUint8 {
-        let seed_counter = SEED_COUNTER.fetch_add(1, Ordering::Relaxed) as u128;
+        let seed = SEED_COUNTER.fetch_add(1, Ordering::Relaxed) as u128;
 
-        FheUint8::div_rem(
-            FheUint8::generate_oblivious_pseudo_random(Seed(seed_counter)),
-            13,
-        )
-        .1 + encrypt_points(self.key, 2)
+        FheUint8::div_rem(FheUint8::generate_oblivious_pseudo_random(Seed(seed)), 13).1
+            + encrypt_points(self.key, 2)
     }
 
     fn rate_card(&self, card: &FheUint8) -> FheUint8 {
@@ -182,6 +180,38 @@ impl<'info> Game<'info> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum SecureGameState {
+    Uninitialized,
+    Checking,
+    DealerBusts,
+    DealerWins,
+    PlayerBusts,
+    PlayerWins,
+    Tie,
+    WaitingForDealer,
+    WaitingForPlayer,
+}
+
+impl TryFrom<u8> for SecureGameState {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(SecureGameState::Uninitialized),
+            1 => Ok(SecureGameState::Checking),
+            2 => Ok(SecureGameState::DealerBusts),
+            3 => Ok(SecureGameState::DealerWins),
+            4 => Ok(SecureGameState::PlayerBusts),
+            5 => Ok(SecureGameState::PlayerWins),
+            6 => Ok(SecureGameState::Tie),
+            7 => Ok(SecureGameState::WaitingForDealer),
+            8 => Ok(SecureGameState::WaitingForPlayer),
+            _ => Err(()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,7 +228,7 @@ mod tests {
     fn create_game() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![9, 8, 7, 6];
 
@@ -207,14 +237,14 @@ mod tests {
 
         assert_eq!(vec!(6, 7), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
     }
 
     #[test]
     fn dealer_busts_early() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![A, A, 8, 7];
 
@@ -223,58 +253,58 @@ mod tests {
 
         assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(A, A), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::DealerBusts, game.state);
+        assert_eq!(SecureGameState::DealerBusts, game.state);
     }
 
     #[test]
     fn dealer_busts_late() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![9, 8, 7, 8, 7];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.stand();
 
-        assert_eq!(GameState::WaitingForDealer, game.state);
+        assert_eq!(SecureGameState::WaitingForDealer, game.state);
 
         game.hit_as_dealer();
 
         assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(7, 8, 9), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::DealerBusts, game.state);
+        assert_eq!(SecureGameState::DealerBusts, game.state);
     }
 
     #[test]
     fn dealer_wins() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![Q, J, 9, 8];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.stand();
 
         assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::DealerWins, game.state);
+        assert_eq!(SecureGameState::DealerWins, game.state);
     }
 
     #[test]
     fn dealer_wins_early() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![A, K, 7, 6];
 
@@ -283,58 +313,58 @@ mod tests {
 
         assert_eq!(vec!(6, 7), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(K, A), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::DealerWins, game.state);
+        assert_eq!(SecureGameState::DealerWins, game.state);
     }
 
     #[test]
     fn dealer_wins_late() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![8, 7, 6, Q, J];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.stand();
 
-        assert_eq!(GameState::WaitingForDealer, game.state);
+        assert_eq!(SecureGameState::WaitingForDealer, game.state);
 
         game.hit_as_dealer();
 
         assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(6, 7, 8), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::DealerWins, game.state);
+        assert_eq!(SecureGameState::DealerWins, game.state);
     }
 
     #[test]
     fn game_ends_in_a_tie() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![9, 8, 9, 8];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.stand();
 
         assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::Tie, game.state);
+        assert_eq!(SecureGameState::Tie, game.state);
     }
 
     #[test]
     fn player_busts_early() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![8, 7, A, A];
 
@@ -343,54 +373,54 @@ mod tests {
 
         assert_eq!(vec!(A, A), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::PlayerBusts, game.state);
+        assert_eq!(SecureGameState::PlayerBusts, game.state);
     }
 
     #[test]
     fn player_busts_late() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![9, 8, 7, 8, 7];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.hit_as_player();
 
         assert_eq!(vec!(7, 8, 9), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(7, 8), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::PlayerBusts, game.state);
+        assert_eq!(SecureGameState::PlayerBusts, game.state);
     }
 
     #[test]
     fn player_wins() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![9, 8, Q, J];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.stand();
 
         assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(8, 9), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::PlayerWins, game.state);
+        assert_eq!(SecureGameState::PlayerWins, game.state);
     }
 
     #[test]
     fn player_wins_early() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![7, 6, A, K];
 
@@ -399,30 +429,30 @@ mod tests {
 
         assert_eq!(vec!(K, A), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(6, 7), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::PlayerWins, game.state);
+        assert_eq!(SecureGameState::PlayerWins, game.state);
     }
 
     #[test]
     fn player_wins_late() {
         let key = initialize_keys();
 
-        let mut game = Game::new(&key);
+        let mut game = SecureGame::new(&key);
 
         let deck = vec![8, Q, J, 7, 6];
 
         game.plant_deck(&deck);
         game.create_game();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.hit_as_player();
 
-        assert_eq!(GameState::WaitingForPlayer, game.state);
+        assert_eq!(SecureGameState::WaitingForPlayer, game.state);
 
         game.stand();
 
         assert_eq!(vec!(6, 7, 8), decrypt_cards(&key, &game.cards_for_player));
         assert_eq!(vec!(J, Q), decrypt_cards(&key, &game.cards_for_dealer));
-        assert_eq!(GameState::PlayerWins, game.state);
+        assert_eq!(SecureGameState::PlayerWins, game.state);
     }
 }
