@@ -5,7 +5,7 @@ use blockjack::tfhe_keys::initialize_keys;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 
 pub fn blockjack(criterion: &mut Criterion) {
-    let key = initialize_keys();
+    let (client_key, _) = initialize_keys();
 
     let mut group = criterion.benchmark_group("blockjack");
 
@@ -27,7 +27,7 @@ pub fn blockjack(criterion: &mut Criterion) {
 
     group.bench_function(BenchmarkId::new("playSecure", 0), |bench| {
         bench.iter(|| {
-            let mut game = SecureGame::new(&key);
+            let mut game = SecureGame::new(&client_key);
 
             let deck = vec![6, 6, 6, 6, 6, 6];
 

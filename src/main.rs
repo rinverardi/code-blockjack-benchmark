@@ -1,43 +1,67 @@
-mod naive_game;
-mod secure_game;
-mod tfhe_keys;
-mod tfhe_values;
+use std::io::{stdout, Write};
 
-use crate::naive_game::NaiveGame;
-use crate::secure_game::SecureGame;
-use crate::tfhe_keys::initialize_keys;
+use blockjack::tfhe_keys::initialize_keys;
+use blockjack::{naive_game::NaiveGame, secure_game::SecureGame};
 
-fn main() {
-    run_naive_game();
-    run_secure_game();
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
+use tfhe::{set_server_key, ClientKey};
+
+fn blip() {
+    stdout().write(b".").unwrap();
+    stdout().flush().unwrap();
 }
 
-fn run_naive_game() {
+fn play_naive() {
     let mut game = NaiveGame::new(0);
 
-    let deck = vec![8, 8, 7, 6, 7, 6];
+    let deck = vec![6, 6, 6, 6, 6, 6];
 
     game.plant_deck(&deck);
     game.create_game();
     game.hit_as_player();
     game.stand();
     game.hit_as_dealer();
-
-    game.dump_game();
 }
 
-fn run_secure_game() {
-    let key = initialize_keys();
-
+fn play_secure(key: ClientKey) {
     let mut game = SecureGame::new(&key);
 
-    let deck = vec![8, 8, 7, 6, 7, 6];
+    let deck = vec![6, 6, 6, 6, 6, 6];
 
     game.plant_deck(&deck);
     game.create_game();
     game.hit_as_player();
     game.stand();
     game.hit_as_dealer();
+}
 
-    game.dump_game();
+fn main() {
+    let (client_key, server_key) = initialize_keys();
+
+    rayon::broadcast(|_| set_server_key(server_key.clone()));
+
+    for parallel_games in (10..=100).step_by(10) {
+        dbg!(parallel_games);
+
+        (0..parallel_games).into_par_iter().for_each(|_| {
+            play_secure(client_key.clone());
+            blip();
+        });
+
+        println!();
+    }
+
+    /*
+    for parallel_games in (10..=100).step_by(10) {
+        dbg!(parallel_games);
+
+        (0..parallel_games).into_par_iter().for_each(|_| {
+            play_naive();
+            blip();
+        });
+
+        println!();
+    }
+    */
 }
