@@ -80,6 +80,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "rand_chacha",
+ "rayon",
  "tfhe",
 ]
 
@@ -725,9 +726,9 @@ dependencies = [
 
 [[package]]
 name = "tfhe"
-version = "1.2.0"
+version = "1.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cb9a09347f586b9e49336ddad761706dfbfc414c44a8892b5a38666a47736a9"
+checksum = "11e74f14e2812ac6a2fe516f2c090431b614d589c24c6e3bca3fe763d4de928e"
 dependencies = [
  "aligned-vec",
  "bincode",
@@ -749,9 +750,9 @@ dependencies = [
 
 [[package]]
 name = "tfhe-csprng"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b1a0b71a91c9e36e9e1e8e6a528a056086b01e193e173472ae59cfaac56fdad"
+checksum = "06450766ae375cd305281c5d691a41d8877e40d3cc7510a33244775d62f60ad4"
 dependencies = [
  "aes",
  "libc",

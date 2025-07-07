@@ -9,7 +9,7 @@ use tfhe::{generate_keys, set_server_key, ClientKey, ConfigBuilder, ServerKey};
 const PATH_CLIENT: &str = ".tfhe/client.key";
 const PATH_SERVER: &str = ".tfhe/server.key";
 
-pub fn initialize_keys() -> ClientKey {
+pub fn initialize_keys() -> (ClientKey, ServerKey) {
     let client_key: ClientKey;
     let server_key: ServerKey;
 
@@ -44,7 +44,7 @@ pub fn initialize_keys() -> ClientKey {
         write(PATH_SERVER, server_key_buffer).unwrap();
     }
 
-    set_server_key(server_key);
+    set_server_key(server_key.clone());
 
-    client_key
+    return (client_key, server_key);
 }
