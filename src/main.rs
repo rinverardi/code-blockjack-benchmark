@@ -1,3 +1,4 @@
+use std::env;
 use std::io::{stdout, Write};
 
 use blockjack::tfhe_keys::initialize_keys;
@@ -12,7 +13,7 @@ fn blip() {
     stdout().flush().unwrap();
 }
 
-fn play_naive() {
+fn play_naive_game() {
     let mut game = NaiveGame::new(0);
 
     let deck = vec![6, 6, 6, 6, 6, 6];
@@ -24,7 +25,20 @@ fn play_naive() {
     game.hit_as_dealer();
 }
 
-fn play_secure(key: ClientKey) {
+fn play_naive_games() {
+    for parallel_games in (10..=100).step_by(10) {
+        dbg!(parallel_games);
+
+        (0..parallel_games).into_par_iter().for_each(|_| {
+            play_naive_game();
+            blip();
+        });
+
+        println!();
+    }
+}
+
+fn play_secure_game(key: ClientKey) {
     let mut game = SecureGame::new(&key);
 
     let deck = vec![6, 6, 6, 6, 6, 6];
@@ -36,7 +50,7 @@ fn play_secure(key: ClientKey) {
     game.hit_as_dealer();
 }
 
-fn main() {
+fn play_secure_games() {
     let (client_key, server_key) = initialize_keys();
 
     rayon::broadcast(|_| set_server_key(server_key.clone()));
@@ -45,23 +59,25 @@ fn main() {
         dbg!(parallel_games);
 
         (0..parallel_games).into_par_iter().for_each(|_| {
-            play_secure(client_key.clone());
+            play_secure_game(client_key.clone());
             blip();
         });
 
         println!();
     }
+}
 
-    /*
-    for parallel_games in (10..=100).step_by(10) {
-        dbg!(parallel_games);
+fn main() {
+    let args: Vec<String> = env::args().skip(1).collect();
 
-        (0..parallel_games).into_par_iter().for_each(|_| {
-            play_naive();
-            blip();
-        });
-
-        println!();
+    for arg in args {
+        match arg.as_str() {
+            "naive" => play_naive_games(),
+            "secure" => play_secure_games(),
+            other => {
+                eprintln!("Unknown command: '{}'", other);
+                std::process::exit(1);
+            }
+        }
     }
-    */
 }

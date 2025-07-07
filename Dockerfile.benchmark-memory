@@ -1,0 +1,14 @@
+FROM rust:1.88.0-bookworm
+
+WORKDIR /blockjack
+COPY benches/ benches/
+COPY Cargo.* ./
+COPY src/ src/
+
+RUN apt-get update
+RUN apt-get install -y heaptrack
+RUN cargo build --release
+RUN mkdir results
+RUN mkdir .tfhe
+
+ENTRYPOINT ["heaptrack", "-o", "results/heaptrack", "target/release/blockjack"]

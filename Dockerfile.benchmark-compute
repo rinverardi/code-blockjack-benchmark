@@ -1,0 +1,13 @@
+FROM rust:1.88.0-bookworm
+
+WORKDIR /blockjack
+COPY benches/ benches/
+COPY Cargo.* ./
+COPY src/ src/
+
+RUN apt-get update
+RUN apt-get install -y gnuplot
+RUN cargo bench --no-run
+RUN mkdir .tfhe
+
+CMD cargo bench
