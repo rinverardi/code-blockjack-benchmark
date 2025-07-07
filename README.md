@@ -8,10 +8,13 @@ Clean up:
 
 	$ cargo clean
 
-Run the benchmarks:
-
-	$ cargo run --release
-
 Run the tests:
 
 	$ cargo test --release
+
+### Compute Benchmarks
+
+Run the compute benchmarks:
+
+	$ cargo bench
+
